@@ -64,6 +64,21 @@ def compile_cuda_tile():
     )
 
     return function
+
+def compile_cuda_tile_coarsen():
+    cuda_source = Path("coarsen_kernel.cu").read_text()
+    cpp_source = "torch::Tensor matmul(torch::Tensor A, torch::Tensor B);"
+    function = load_inline(
+        name="matmul",
+        cpp_sources=cpp_source,
+        cuda_sources=cuda_source,
+        functions=["matmul"],
+        with_cuda=True,
+        extra_cuda_cflags=["-O2"],
+    )
+
+    return function
+
 def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -72,18 +87,21 @@ def main():
     # b = torch.tensor([[7, 8, 9, 10], [11, 12, 13, 14], [15, 16, 17, 18]], dtype=torch.float32).to(device)
     # a = torch.tensor([[1.0, 2.0], [3.0, 4.0]]).to(device)
     # b = torch.tensor([[5.0, 6.0], [7.0, 8.0]]).to(device)
-    a = torch.randn(1000, 2000).to(device)    
-    b = torch.randn(2000, 3000).to(device)    
+    # a = torch.randn(1000, 2000, device=device, dtype=torch.float32)   
+    # b = torch.randn(2000, 3000, device=device, dtype=torch.float32)   
+    a = torch.randn(1000, 2000, device=device, dtype=torch.float32)   
+    b = torch.randn(2000, 3000, device=device, dtype=torch.float32) 
 
 
     matmul_org = compile_cuda_org()
     matmul_tile = compile_cuda_tile()
+    matmul_tile_coarsen = compile_cuda_tile_coarsen()
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
 
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
         start_event.record()
-        for i in range(10):
+        for i in range(100):
             c_ = matmul_org.matmul(a, b)
         
         end_event.record()
@@ -96,7 +114,7 @@ def main():
 
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
         start_event.record()
-        for i in range(10):
+        for i in range(100):
             c__ = matmul_tile.matmul(a, b)
         
         end_event.record()
@@ -108,7 +126,17 @@ def main():
 
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
         start_event.record()
-        for i in range(10):
+        for i in range(100):
+            c___ = matmul_tile_coarsen.matmul(a, b)
+        
+        end_event.record()
+        torch.cuda.synchronize()
+        elapsed_time_ms = start_event.elapsed_time(end_event)
+        print(f"Elapsed time for 1000 iterations tile coarsen: {elapsed_time_ms} ms")
+
+    with torch.autograd.profiler.profile(use_cuda=True) as prof:
+        start_event.record()
+        for i in range(100):
             c = torch.matmul(a, b)
             
         end_event.record()
@@ -116,8 +144,9 @@ def main():
         elapsed_time_ms = start_event.elapsed_time(end_event)
         print(f"Elapsed time for 1000 iterations torch: {elapsed_time_ms} ms")
     # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=-1))
-    # assert torch.allclose(c, c_), "Results do not match"
-    # assert torch.allclose(c, c__), "Results do not match"
+    # assert torch.allclose(c, c_, rtol=1e-03, atol=1e-04), "Results do not match"
+    # assert torch.allclose(c, c__, rtol=1e-03, atol=1e-04), "Results do not match"
+    # assert torch.allclose(c, c___, rtol=1e-03, atol=1e-04), "Results do not match"
 
 
 if __name__ == "__main__":

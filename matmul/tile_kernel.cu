@@ -29,6 +29,37 @@ void matmul_tile_kernel(float *A, float *B, float *C, int a, int b, int c){
     }
 }
 
+__global__
+void matmul_tile_kernel_corner_tuning(float *A, float *B, float *C, int a, int b, int c){
+    // use tile to reduce the access to global memory. perform the calculation using the share memory
+    __shared__ float Ads[TILE_SIZE][TILE_SIZE];
+    __shared__ float Bds[TILE_SIZE][TILE_SIZE];
+
+    int bx = blockIdx.x; int by = blockIdx.y;
+    int tx = threadIdx.x; int ty = threadIdx.y;
+    int row = by * TILE_SIZE + ty;
+    int col = bx * TILE_SIZE + tx;
+    int col0 = bx * TILE_SIZE;
+
+    // if(!(row < a && col < c)){
+    //     // C[row * c + col] = 0.0f;
+    //     return ; // 注意，提前return就不负责把相关的值load为0，这样可能会导致垃圾值从而错误!!
+    // }
+    float Pvalue = 0.0f;
+    for(int ph = 0; ph < ceil(b / (float) TILE_SIZE); ++ph){
+        Ads[ty][tx] = ((row < a && ph * TILE_SIZE + tx < b) ? A[row * b + ph * TILE_SIZE + tx] : 0.0f);
+        Bds[tx][ty] = ((col < c && ph * TILE_SIZE + ty < b) ? B[(ph * TILE_SIZE + tx) * c + col0 + ty] : 0.0f); // notice the corner cases
+        __syncthreads();
+        for(int k = 0; k < TILE_SIZE; ++k){
+            Pvalue += Ads[ty][k] * Bds[k][tx];
+        }
+        __syncthreads();
+    }
+    if (row < a && col < c) {
+        C[row * c + col] = Pvalue;
+    }
+}
+
 // helper function
 inline unsigned int cdiv(unsigned int a, unsigned int b){
     return (a + b - 1) / b;
