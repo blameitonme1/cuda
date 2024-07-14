@@ -58,6 +58,36 @@ def compile_cuda_cache():
 
     return function
 
+def compile_cuda_tile():
+    cuda_source = Path("tile_kernel.cu").read_text()
+    cpp_source = "torch::Tensor conv_2d(torch::Tensor A, torch::Tensor B);"
+
+    function = load_inline(
+        name="conv_2d",
+        cpp_sources=cpp_source,
+        cuda_sources=cuda_source,
+        functions=["conv_2d"],
+        with_cuda=True,
+        extra_cuda_cflags=["-O2"],
+    )
+
+    return function
+
+def compile_cuda_tile_cache_halo():
+    cuda_source = Path("cache_halo_cell_tile_kernel.cu").read_text()
+    cpp_source = "torch::Tensor conv_2d(torch::Tensor A, torch::Tensor B);"
+
+    function = load_inline(
+        name="conv_2d",
+        cpp_sources=cpp_source,
+        cuda_sources=cuda_source,
+        functions=["conv_2d"],
+        with_cuda=True,
+        extra_cuda_cflags=["-O2"],
+    )
+
+    return function
+
 def compile_cuda_basic():
     cuda_source = Path("basic_kernel.cu").read_text()
     cpp_source = "torch::Tensor conv_2d(torch::Tensor A, torch::Tensor B);"
@@ -88,6 +118,8 @@ def main():
 
     conv2d_basic = compile_cuda_basic()
     conv2d_cache = compile_cuda_cache()
+    conv2d_tile = compile_cuda_tile()
+    conv2d_tile_cache_halo = compile_cuda_tile_cache_halo()
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
 
@@ -101,6 +133,8 @@ def main():
         elapsed_time_ms = start_event.elapsed_time(end_event)
         print(f"Elapsed time for 10 iterations basic: {elapsed_time_ms} ms")
     
+    display_tensor_as_image(c, "./basic.jpg")
+    
     # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=-1))
         
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
@@ -112,6 +146,30 @@ def main():
         torch.cuda.synchronize()
         elapsed_time_ms = start_event.elapsed_time(end_event)
         print(f"Elapsed time for 10 iterations cache: {elapsed_time_ms} ms")
+    
+    display_tensor_as_image(c, "./cache.jpg")
+
+    with torch.autograd.profiler.profile(use_cuda=True) as prof:
+        start_event.record()
+        for i in range(10):
+            c = conv2d_tile.conv_2d(a, b)
+        end_event.record()
+        torch.cuda.synchronize()
+        elapsed_time_ms = start_event.elapsed_time(end_event)
+        print(f"Elapsed time for 10 iterations cache: {elapsed_time_ms} ms")
+    
+    display_tensor_as_image(c, "./tile.jpg")
+
+    with torch.autograd.profiler.profile(use_cuda=True) as prof:
+        start_event.record()
+        for i in range(10):
+            c = conv2d_tile_cache_halo.conv_2d(a, b)
+        end_event.record()
+        torch.cuda.synchronize()
+        elapsed_time_ms = start_event.elapsed_time(end_event)
+        print(f"Elapsed time for 10 iterations cache: {elapsed_time_ms} ms")
+
+    display_tensor_as_image(c, "./cache_halo.jpg")
 
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
         start_event.record()
@@ -122,11 +180,12 @@ def main():
         torch.cuda.synchronize()
         elapsed_time_ms = start_event.elapsed_time(end_event)
         print(f"Elapsed time for 10 iterations torch: {elapsed_time_ms} ms")
+    
+    display_tensor_as_image(c)
     # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=-1))
     # assert torch.allclose(c, c_, rtol=1e-03, atol=1e-04), "Results do not match"
     # assert torch.allclose(c, c__, rtol=1e-03, atol=1e-04), "Results do not match"
     # assert torch.allclose(c, c___, rtol=1e-03, atol=1e-04), "Results do not match"
-    display_tensor_as_image(c, "./black.jpg")
 
 
 if __name__ == "__main__":
