@@ -4,11 +4,11 @@ void brent_kung_scan(float *X, float *Y, unsigned int N) {
     // 使用brent-kung scan
     // 输入: X, 输出: Y, N为该段的长度，需小于SECTION_SIZE
     __shared__ float XY[SECTION_SIZE];
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int i = 2 * blockIdx.x * blockDim.x + threadIdx.x; // 注意这里是2倍的，因为要同时load两个元素
     if(i < N) XY[threadIdx.x] = X[i];
     if(i + blockDim.x < N) XY[threadIdx.x + blockDim.x] = X[i + blockDim.x]; // 集体将元素load到SRAM
     // reduction阶段，积累partial sum
-    for(int stride = 1; stride < blockDim.x; stride *= 2){
+    for(int stride = 1; stride <= blockDim.x; stride *= 2){
         __syncthreads();
         int index = (threadIdx.x + 1) * 2 * stride - 1; // 向高处积累partial sum
         if(index < SECTION_SIZE){
@@ -37,7 +37,7 @@ inline unsigned int cdiv(unsigned int a, unsigned int b){
 
 void scan_inblock(torch::Tensor A, torch::Tensor B){
     int length = A.size(0);
-    dim3 dimBlock(SECTION_SIZE); // section的大小和thread的数量相同
+    dim3 dimBlock(SECTION_SIZE / 2); // section的大小和thread的数量相同
     dim3 dimGrid(1); // 只用一个block
     brent_kung_scan<<<dimGrid, dimBlock>>>(A.data_ptr<float>(), B.data_ptr<float>(), length);
     cudaError_t err = cudaGetLastError();
